@@ -24,6 +24,8 @@ class TorrentEngine(private val context: Context) {
     private val names = ConcurrentHashMap<String, String>()
     // 被用户暂停的任务
     private val pausedSet: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    // 正在获取元数据的磁力链（key 为磁力链字符串）
+    private val pendingMagnets = ConcurrentHashMap<String, PendingMagnet>()
 
     val downloadDir: File = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
 
@@ -53,9 +55,31 @@ class TorrentEngine(private val context: Context) {
 
     /** 磁力链：阻塞获取元数据（应在后台线程调用），超时 180 秒。 */
     fun addMagnet(magnet: String): String {
-        val bytes = session.fetchMagnet(magnet, 180, torrentDir)
-            ?: throw IllegalStateException("获取元数据超时（3 分钟），请检查网络或磁力链")
-        return addTorrentBytes(bytes)
+        val key = magnet
+        val start = System.currentTimeMillis()
+        pendingMagnets[key] = PendingMagnet(magnetName(magnet), start, null)
+        try {
+            val bytes = session.fetchMagnet(magnet, METADATA_TIMEOUT_SEC, torrentDir)
+                ?: throw IllegalStateException("获取元数据超时（3 分钟），请检查网络或磁力链")
+            return addTorrentBytes(bytes)
+        } catch (e: Exception) {
+            pendingMagnets[key] = pendingMagnets[key]?.copy(error = e.message ?: "失败")
+            throw e
+        } finally {
+            // 成功后正式任务会出现在 handles 中；失败的记录保留 5 秒供界面显示后移除
+            Thread {
+                try { Thread.sleep(5_000) } catch (_: InterruptedException) {}
+                pendingMagnets.remove(key)
+            }.start()
+        }
+    }
+
+    /** 正在获取元数据的磁力链：名称、开始时间、错误信息。 */
+    fun pendingSnapshot(): List<PendingMagnet> = pendingMagnets.values.toList()
+
+    private fun magnetName(magnet: String): String {
+        val dn = Regex("[?&]dn=([^&]+)").find(magnet)?.groupValues?.get(1)
+        return try { if (dn != null) java.net.URLDecoder.decode(dn, "UTF-8") else "磁力链任务" } catch (_: Exception) { "磁力链任务" }
     }
 
     fun pause(hash: String) {
@@ -120,6 +144,14 @@ class TorrentEngine(private val context: Context) {
     private fun isSafePath(p: String): Boolean =
         !p.startsWith("/") && !p.contains(":") && p.split('/', '\\').none { it == ".." }
 }
+
+const val METADATA_TIMEOUT_SEC = 180
+
+data class PendingMagnet(
+    val name: String,
+    val startedAt: Long,
+    val error: String?,
+)
 
 data class TaskItem(
     val infoHash: String,

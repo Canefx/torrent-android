@@ -34,7 +34,7 @@ class MainActivity : AppCompatActivity() {
 
     private val refresher = object : Runnable {
         override fun run() {
-            engine?.let { renderList(it.snapshot()) }
+            engine?.let { renderList(it.snapshot(), it.pendingSnapshot()) }
             ui.postDelayed(this, 1500)
         }
     }
@@ -141,11 +141,28 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderList(items: List<TaskItem>) {
+    private fun renderList(items: List<TaskItem>, pending: List<PendingMagnet>) {
         listBox.removeAllViews()
-        if (items.isEmpty()) {
+        if (items.isEmpty() && pending.isEmpty()) {
             listBox.addView(TextView(this).apply { text = "暂无任务"; gravity = Gravity.CENTER; setPadding(0, 48, 0, 48) })
             return
+        }
+        // 正在获取元数据的磁力链：显示已等待时间与剩余超时
+        for (p in pending) {
+            val card = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, 24, 0, 24) }
+            card.addView(TextView(this).apply { text = p.name; textSize = 16f })
+            val elapsed = ((System.currentTimeMillis() - p.startedAt) / 1000).toInt()
+            val left = (METADATA_TIMEOUT_SEC - elapsed).coerceAtLeast(0)
+            val info = if (p.error != null) "获取失败：${p.error}"
+                else "正在获取元数据（DHT / 节点查找中）· 已等待 ${elapsed}s · 超时剩余 ${left}s"
+            card.addView(TextView(this).apply { text = info; textSize = 12f })
+            card.addView(ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                // 元数据阶段无法得知真实进度，用不定进度表示仍在工作
+                isIndeterminate = p.error == null
+                max = 1000
+                progress = if (p.error != null) 0 else (elapsed * 1000 / METADATA_TIMEOUT_SEC).coerceIn(0, 1000)
+            })
+            listBox.addView(card)
         }
         for (t in items) {
             val card = LinearLayout(this).apply {

@@ -112,13 +112,19 @@ class UpdateChecker(private val activity: Activity) {
 
     // ---------- HTTP ----------
 
-    private fun httpGet(url: String): String = open(url).use { conn ->
-        check(conn.responseCode == 200) { "HTTP ${conn.responseCode}" }
-        conn.inputStream.bufferedReader().readText()
+    private fun httpGet(url: String): String {
+        val conn = open(url)
+        try {
+            check(conn.responseCode == 200) { "HTTP ${conn.responseCode}" }
+            return conn.inputStream.bufferedReader().readText()
+        } finally {
+            conn.disconnect()
+        }
     }
 
     private fun download(url: String, dest: File, onProgress: (Int) -> Unit) {
-        open(url).use { conn ->
+        val conn = open(url)
+        try {
             check(conn.responseCode == 200) { "下载失败 HTTP ${conn.responseCode}" }
             val total = conn.contentLengthLong
             var done = 0L
@@ -134,6 +140,8 @@ class UpdateChecker(private val activity: Activity) {
                     }
                 }
             }
+        } finally {
+            conn.disconnect()
         }
         check(dest.length() > 100_000) { "下载的 APK 过小，可能不是有效文件" }
     }

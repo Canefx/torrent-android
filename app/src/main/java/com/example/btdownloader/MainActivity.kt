@@ -55,6 +55,9 @@ class MainActivity : AppCompatActivity() {
         val svc = Intent(this, DownloadService::class.java)
         startForegroundService(svc)
         bindService(svc, connection, Context.BIND_AUTO_CREATE)
+
+        // 启动时静默检查一次更新；失败不打扰用户
+        checkUpdate(manual = false)
     }
 
     override fun onDestroy() {
@@ -98,6 +101,10 @@ class MainActivity : AppCompatActivity() {
         row.addView(Button(this).apply {
             text = "添加种子文件"
             setOnClickListener { pickTorrent.launch(arrayOf("*/*")) }
+        })
+        row.addView(Button(this).apply {
+            text = "检查更新"
+            setOnClickListener { checkUpdate(manual = true) }
         })
         root.addView(row)
 
@@ -196,6 +203,25 @@ class MainActivity : AppCompatActivity() {
             card.addView(row)
             listBox.addView(card)
         }
+    }
+
+    /** 检查在线更新；manual=true 时无论结果如何都给用户反馈 */
+    private fun checkUpdate(manual: Boolean) {
+        if (manual) toast("正在检查更新…")
+        UpdateChecker(this).check(
+            onNewVersion = { info ->
+                AlertDialog.Builder(this)
+                    .setTitle("发现新版本 ${info.versionName}")
+                    .setMessage(info.changelog.ifBlank { "是否下载并安装？" })
+                    .setPositiveButton("下载更新") { _, _ ->
+                        UpdateChecker(this).downloadAndInstall(info) { msg -> toast(msg) }
+                    }
+                    .setNegativeButton("稍后", null)
+                    .show()
+            },
+            onUpToDate = { if (manual) toast("已是最新版本") },
+            onError = { msg -> if (manual) toast("检查更新失败：$msg") },
+        )
     }
 
     private fun confirmRemove(t: TaskItem) {

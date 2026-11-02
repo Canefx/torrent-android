@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,10 +24,45 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Read version from build.gradle.kts
+        id: ver
+        run: |
+          VERSION=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts)
+          VCODE=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' app/build.gradle.kts)
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "code=$VCODE" >> "$GITHUB_OUTPUT"
+
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk "BtDownloader-${{ steps.ver.outputs.name }}.apk"
+
+      - name: Write version.json
+        run: |
+          cat > version.json <<EOF
+          {"versionCode": ${{ steps.ver.outputs.code }}, "versionName": "${{ steps.ver.outputs.name }}"}
+          EOF
 
       - uses: actions/upload-artifact@v4
         with:
           name: BtDownloader-debug
           path: app/build/outputs/apk/debug/*.apk
+
+      # 只在 main 分支推送时发布 Release，供 App 内在线更新使用
+      - name: Publish release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="v${{ steps.ver.outputs.name }}"
+          NOTES="自动构建 $TAG"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "BtDownloader-${{ steps.ver.outputs.name }}.apk" version.json --clobber
+          else
+            gh release create "$TAG" \
+              "BtDownloader-${{ steps.ver.outputs.name }}.apk" \
+              version.json \
+              --title "$TAG" \
+              --notes "$NOTES"
+          fi

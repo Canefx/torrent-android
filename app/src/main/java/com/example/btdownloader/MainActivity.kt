@@ -1,5 +1,6 @@
 package com.example.btdownloader
 
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
@@ -23,10 +24,9 @@ import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
 import java.util.concurrent.Executors
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : Activity() {
 
     private var engine: TorrentEngine? = null
     private val worker = Executors.newSingleThreadExecutor()
@@ -156,7 +156,7 @@ class MainActivity : AppCompatActivity() {
         })
         row.addView(space(8))
         row.addView(actionButton("选择种子", C_SECONDARY, 1f) {
-            pickTorrent.launch(arrayOf("*/*"))
+            pickTorrentFile()
         })
         row.addView(space(8))
         row.addView(actionButton("检查更新", C_GHOST, 1f, textColor = C_TEXT) {
@@ -367,11 +367,20 @@ class MainActivity : AppCompatActivity() {
 
     // ---------------- 交互 ----------------
 
-    private val pickTorrent = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri == null) return@registerForActivityResult
-        val e = engine ?: return@registerForActivityResult toast("引擎未就绪")
+    /** 打开系统文件选择器挑选 .torrent */
+    private fun pickTorrentFile() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+        startActivityForResult(intent, REQ_TORRENT)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_TORRENT || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        val e = engine ?: return toast("引擎未就绪")
         worker.execute {
             try {
                 val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
@@ -442,6 +451,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     companion object {
+        private const val REQ_TORRENT = 1001
         private val C_BG = Color.parseColor("#F2F4F7")
         private val C_HEADER = Color.parseColor("#243447")
         private val C_WHITE = Color.WHITE

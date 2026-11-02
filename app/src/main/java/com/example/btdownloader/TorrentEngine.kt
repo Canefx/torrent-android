@@ -63,7 +63,7 @@ class TorrentEngine(private val context: Context) {
                 ?: throw IllegalStateException("获取元数据超时（3 分钟），请检查网络或磁力链")
             return addTorrentBytes(bytes)
         } catch (e: Exception) {
-            pendingMagnets[key] = pendingMagnets[key]?.copy(error = e.message ?: "失败")
+            pendingMagnets[key]?.let { pendingMagnets[key] = it.copy(error = e.message ?: "失败") }
             throw e
         } finally {
             // 成功后正式任务会出现在 handles 中；失败的记录保留 5 秒供界面显示后移除

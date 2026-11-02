@@ -20,6 +20,8 @@ class TorrentEngine(private val context: Context) {
 
     // infoHash -> 任务句柄
     private val handles = ConcurrentHashMap<String, TorrentHandle>()
+    // infoHash -> 任务名称
+    private val names = ConcurrentHashMap<String, String>()
 
     val downloadDir: File = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
 
@@ -59,8 +61,9 @@ class TorrentEngine(private val context: Context) {
 
     fun remove(hash: String, deleteFiles: Boolean) {
         val h = handles.remove(hash) ?: return
-        session.remove(h, if (deleteFiles) SessionHandle.DELETE_FILES else 0)
+        if (deleteFiles) session.remove(h, SessionHandle.DELETE_FILES) else session.remove(h)
         File(torrentDir, "$hash.torrent").delete()
+        names.remove(hash)
         removeRecord(hash)
     }
 
@@ -69,13 +72,13 @@ class TorrentEngine(private val context: Context) {
         val st = h.status()
         TaskItem(
             infoHash = hash,
-            name = h.name() ?: hash,
+            name = names[hash] ?: hash,
             progress = st.progress().toDouble(),
             downloadRate = st.downloadRate().toLong(),
             uploadRate = st.uploadRate().toLong(),
             peers = st.numPeers(),
-            paused = st.isPaused,
-            finished = st.isFinished,
+            paused = st.isPaused(),
+            finished = st.isFinished(),
             state = st.state().name,
         )
     }.sortedBy { it.name }
@@ -83,6 +86,7 @@ class TorrentEngine(private val context: Context) {
     private fun startTorrent(info: TorrentInfo, hash: String) {
         session.download(info, downloadDir)
         handles[hash] = session.find(info.infoHash())
+        names[hash] = info.name()
     }
 
     private fun restoreSaved() {

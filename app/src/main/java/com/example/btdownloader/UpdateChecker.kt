@@ -18,47 +18,29 @@ data class UpdateInfo(
 )
 
 /**
- * 在线更新：读取 GitHub Releases 的最新版本，比较 versionCode 后提示下载安装。
- * 仓库需为公开仓库，否则未登录请求会返回 404/401。
+ * 在线更新：从 GitHub Releases 的 latest 读取 version.json，比较 versionCode。
+ *
+ * 刻意不使用 api.github.com：匿名 API 有每小时 60 次的配额，
+ * 手机共用出口 IP 时极易被耗尽（返回 403）。这里改用
+ * /releases/latest/download/<文件名> 这种由 GitHub 直接重定向到 CDN 的地址，
+ * 不受 API 限流影响，也不需要 token。
  */
 class UpdateChecker(private val activity: Activity) {
 
     fun check(onNewVersion: (UpdateInfo) -> Unit, onUpToDate: () -> Unit, onError: (String) -> Unit) {
         Thread {
             try {
-                val rel = JSONObject(httpGet("$API/releases/latest"))
-                val tag = rel.optString("tag_name", "").removePrefix("v")
-                val changelog = rel.optString("body", "")
+                val json = JSONObject(httpGet("$BASE/version.json"))
+                val code = json.optInt("versionCode", 0)
+                val name = json.optString("versionName", "")
+                val changelog = json.optString("changelog", "")
+                val apkName = json.optString("apk", "BtDownloader.apk")
 
-                var apkUrl: String? = null
-                var manifestUrl: String? = null
-                val assets = rel.optJSONArray("assets")
-                if (assets != null) {
-                    for (i in 0 until assets.length()) {
-                        val a = assets.getJSONObject(i)
-                        val name = a.optString("name")
-                        val url = a.optString("browser_download_url")
-                        if (name.endsWith(".apk")) apkUrl = url
-                        if (name == "version.json") manifestUrl = url
-                    }
-                }
-                if (apkUrl == null) {
+                if (code > BuildConfig.VERSION_CODE) {
+                    val info = UpdateInfo(code, name.ifEmpty { "新版本" }, changelog, "$BASE/$apkName")
+                    activity.runOnUiThread { onNewVersion(info) }
+                } else {
                     activity.runOnUiThread { onUpToDate() }
-                    return@Thread
-                }
-
-                // version.json 提供精确的 versionCode；缺失时退回按 tag 名比较
-                var code = 0
-                var name = tag
-                if (manifestUrl != null) {
-                    val m = JSONObject(httpGet(manifestUrl!!))
-                    code = m.optInt("versionCode", 0)
-                    name = m.optString("versionName", tag)
-                }
-
-                val info = UpdateInfo(code, name.ifEmpty { tag }, changelog, apkUrl!!)
-                activity.runOnUiThread {
-                    if (info.versionCode > BuildConfig.VERSION_CODE) onNewVersion(info) else onUpToDate()
                 }
             } catch (e: Exception) {
                 activity.runOnUiThread { onError(e.message ?: "检查更新失败") }
@@ -80,6 +62,7 @@ class UpdateChecker(private val activity: Activity) {
             try {
                 val dir = File(activity.cacheDir, "updates").apply { mkdirs() }
                 val apk = File(dir, "update.apk")
+                if (apk.exists()) apk.delete()
                 download(info.apkUrl, apk) { pct ->
                     activity.runOnUiThread { dialog.progress = pct }
                 }
@@ -125,7 +108,7 @@ class UpdateChecker(private val activity: Activity) {
     private fun download(url: String, dest: File, onProgress: (Int) -> Unit) {
         val conn = open(url)
         try {
-            check(conn.responseCode == 200) { "下载失败 HTTP ${conn.responseCode}" }
+            check(conn.responseCode == 200) { "HTTP ${conn.responseCode}" }
             val total = conn.contentLengthLong
             var done = 0L
             conn.inputStream.use { input ->
@@ -146,10 +129,10 @@ class UpdateChecker(private val activity: Activity) {
         check(dest.length() > 100_000) { "下载的 APK 过小，可能不是有效文件" }
     }
 
-    /** 打开连接并跟随重定向（GitHub 资产会 302 到 CDN） */
+    /** 打开连接并跟随重定向（GitHub 的 release 下载会 302 到 CDN） */
     private fun open(url: String): HttpURLConnection {
         var current = url
-        repeat(5) {
+        repeat(6) {
             val conn = (URL(current).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 20_000
                 readTimeout = 30_000
@@ -158,17 +141,20 @@ class UpdateChecker(private val activity: Activity) {
             }
             val code = conn.responseCode
             if (code in 300..399) {
-                current = conn.getHeaderField("Location") ?: return conn
+                val next = conn.getHeaderField("Location")
                 conn.disconnect()
-            } else {
-                return conn
+                if (next != null) {
+                    current = next
+                    return@repeat
+                }
             }
+            return conn
         }
         throw IllegalStateException("重定向过多")
     }
 
     companion object {
         const val REPO = "Canefx/torrent-android"
-        const val API = "https://api.github.com/repos/$REPO"
+        const val BASE = "https://github.com/$REPO/releases/latest/download"
     }
 }

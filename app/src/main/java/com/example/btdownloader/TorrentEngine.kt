@@ -77,8 +77,8 @@ class TorrentEngine(private val context: Context) {
             downloadRate = st.downloadRate().toLong(),
             uploadRate = st.uploadRate().toLong(),
             peers = st.numPeers(),
-            paused = st.isPaused(),
-            finished = st.isFinished(),
+            paused = h.isPaused(),
+            finished = st.state().name.let { it == "SEEDING" || it == "FINISHED" },
             state = st.state().name,
         )
     }.sortedBy { it.name }

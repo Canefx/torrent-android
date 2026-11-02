@@ -35,13 +35,17 @@ jobs:
       - name: Build debug APK
         run: gradle :app:assembleDebug --no-daemon
 
-      - name: Rename APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk "BtDownloader-${{ steps.ver.outputs.name }}.apk"
-
-      - name: Write version.json
+      - name: Prepare release assets
         run: |
+          # 文件名固定，App 通过 /releases/latest/download/<name> 直接取最新版
+          cp app/build/outputs/apk/debug/app-debug.apk BtDownloader.apk
           cat > version.json <<EOF
-          {"versionCode": ${{ steps.ver.outputs.code }}, "versionName": "${{ steps.ver.outputs.name }}"}
+          {
+            "versionCode": ${{ steps.ver.outputs.code }},
+            "versionName": "${{ steps.ver.outputs.name }}",
+            "apk": "BtDownloader.apk",
+            "changelog": "自动构建 v${{ steps.ver.outputs.name }}（提交 ${{ github.sha }}）"
+          }
           EOF
 
       - uses: actions/upload-artifact@v4
@@ -56,13 +60,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="v${{ steps.ver.outputs.name }}"
-          NOTES="自动构建 $TAG"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "BtDownloader-${{ steps.ver.outputs.name }}.apk" version.json --clobber
+            gh release upload "$TAG" BtDownloader.apk version.json --clobber
           else
-            gh release create "$TAG" \
-              "BtDownloader-${{ steps.ver.outputs.name }}.apk" \
-              version.json \
+            gh release create "$TAG" BtDownloader.apk version.json \
               --title "$TAG" \
-              --notes "$NOTES"
+              --notes "自动构建 $TAG"
           fi

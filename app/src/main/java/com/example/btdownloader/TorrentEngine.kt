@@ -22,6 +22,8 @@ class TorrentEngine(private val context: Context) {
     private val handles = ConcurrentHashMap<String, TorrentHandle>()
     // infoHash -> 任务名称
     private val names = ConcurrentHashMap<String, String>()
+    // 被用户暂停的任务
+    private val pausedSet: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     val downloadDir: File = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
 
@@ -56,8 +58,15 @@ class TorrentEngine(private val context: Context) {
         return addTorrentBytes(bytes)
     }
 
-    fun pause(hash: String) = handles[hash]?.pause()
-    fun resume(hash: String) = handles[hash]?.resume()
+    fun pause(hash: String) {
+        handles[hash]?.pause()
+        pausedSet.add(hash)
+    }
+
+    fun resume(hash: String) {
+        handles[hash]?.resume()
+        pausedSet.remove(hash)
+    }
 
     fun remove(hash: String, deleteFiles: Boolean) {
         val h = handles.remove(hash) ?: return
@@ -77,7 +86,7 @@ class TorrentEngine(private val context: Context) {
             downloadRate = st.downloadRate().toLong(),
             uploadRate = st.uploadRate().toLong(),
             peers = st.numPeers(),
-            paused = h.isPaused(),
+            paused = pausedSet.contains(hash),
             finished = st.state().name.let { it == "SEEDING" || it == "FINISHED" },
             state = st.state().name,
         )
